@@ -2,6 +2,8 @@
 ARIHANT SOC - Application Detection Routes
 ==========================================
 API endpoints for application layer attack detection
+
+Auto-triggers threat intelligence reports on detection
 """
 
 from fastapi import APIRouter, Request, HTTPException
@@ -80,23 +82,23 @@ async def detect_application_attack(
         prediction=result
     )
     
-    # Broadcast alert if attack detected with high confidence
+    # AUTO-TRIGGER: Process through Threat Intelligence Engine if attack detected
+    intelligence_result = None
     if result["is_attack"] and result["confidence"] > 0.7:
-        import uuid
-        await ws_manager.broadcast_alert(
-            alert_id=str(uuid.uuid4()),
+        threat_intelligence = request.app.state.threat_intelligence
+        
+        intelligence_result = await threat_intelligence.process_detection(
             attack_type=result["attack_type"],
-            severity=result["severity"],
             confidence=result["confidence"],
-            source="APPLICATION",
-            details={
-                "url": data.url,
-                "method": data.method,
-                "indicators": result.get("indicators", [])
-            }
+            severity=result["severity"],
+            source="application",
+            target_url=data.url,
+            http_method=data.method,
+            payload_snippet=data.request_data[:200] if data.request_data else None,
+            indicators=result.get("indicators", [])
         )
     
-    return ApplicationDetectionResponse(
+    response = ApplicationDetectionResponse(
         success=True,
         timestamp=datetime.utcnow(),
         processing_time_ms=result["processing_time_ms"],
@@ -108,6 +110,19 @@ async def detect_application_attack(
         indicators=result.get("indicators"),
         recommendation=result["recommendation"]
     )
+    
+    # Add intelligence data to response if available
+    if intelligence_result:
+        response_dict = response.model_dump()
+        response_dict["intelligence"] = {
+            "report_id": intelligence_result["report"]["report_id"],
+            "alert_id": intelligence_result["alert"]["id"],
+            "contextual_insight": intelligence_result["report"].get("contextual_insight"),
+            "email_sent": intelligence_result.get("email_sent", False)
+        }
+        return response_dict
+    
+    return response
 
 
 @router.post(

@@ -2,10 +2,12 @@
 ARIHANT SOC - Network Detection Routes
 ======================================
 API endpoints for network intrusion detection
+
+Auto-triggers threat intelligence reports on detection
 """
 
 from fastapi import APIRouter, Request, HTTPException
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 from schemas.request_schemas import NetworkDetectionRequest, NetworkBatchRequest
@@ -14,6 +16,23 @@ from services.prediction_service import PredictionService
 from services.elastic_service import elastic_service
 
 router = APIRouter()
+
+
+def _estimate_traffic_pattern(features: List[float]) -> Optional[str]:
+    """Estimate traffic pattern from features for contextual reporting"""
+    if not features or len(features) < 5:
+        return None
+    
+    # Simple heuristic based on feature variance
+    avg = sum(features) / len(features)
+    variance = sum((x - avg) ** 2 for x in features) / len(features)
+    
+    if variance > 0.5:
+        return "sudden spike"
+    elif variance > 0.2:
+        return "irregular pattern"
+    else:
+        return "steady flow"
 
 
 @router.post(
@@ -60,23 +79,27 @@ async def detect_network_intrusion(
         source_ip=data.source_ip
     )
     
-    # Broadcast alert if attack detected with high confidence
+    # AUTO-TRIGGER: Process through Threat Intelligence Engine if attack detected
+    intelligence_result = None
     if result["is_attack"] and result["confidence"] > 0.7:
-        import uuid
-        await ws_manager.broadcast_alert(
-            alert_id=str(uuid.uuid4()),
+        threat_intelligence = request.app.state.threat_intelligence
+        
+        # Estimate traffic pattern for contextual reporting
+        traffic_pattern = _estimate_traffic_pattern(data.features)
+        
+        intelligence_result = await threat_intelligence.process_detection(
             attack_type=result["attack_type"],
-            severity=result["severity"],
             confidence=result["confidence"],
-            source="NETWORK",
-            details={
-                "source_ip": data.source_ip,
-                "dest_ip": data.dest_ip,
-                "protocol": data.protocol
-            }
+            severity=result["severity"],
+            source="network",
+            source_ip=data.source_ip,
+            target_port=None,  # Could be extracted from features if available
+            traffic_pattern=traffic_pattern,
+            dest_ip=data.dest_ip,
+            protocol=data.protocol
         )
     
-    return NetworkDetectionResponse(
+    response = NetworkDetectionResponse(
         success=True,
         timestamp=datetime.utcnow(),
         processing_time_ms=result["processing_time_ms"],
@@ -88,6 +111,19 @@ async def detect_network_intrusion(
         probabilities=result.get("probabilities"),
         recommendation=result["recommendation"]
     )
+    
+    # Add intelligence data to response if available
+    if intelligence_result:
+        response_dict = response.model_dump()
+        response_dict["intelligence"] = {
+            "report_id": intelligence_result["report"]["report_id"],
+            "alert_id": intelligence_result["alert"]["id"],
+            "contextual_insight": intelligence_result["report"].get("contextual_insight"),
+            "email_sent": intelligence_result.get("email_sent", False)
+        }
+        return response_dict
+    
+    return response
 
 
 @router.post(

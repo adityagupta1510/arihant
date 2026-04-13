@@ -3,6 +3,9 @@ ARIHANT SOC - FastAPI Backend
 =============================
 Production-ready AI-driven Security Operations Center API
 Integrates ML models for Network, Application, Audio, and Human threat detection
+
+Real-time Threat Intelligence System:
+Detection → Report → Alert → WebSocket → Email (optional)
 """
 
 import os
@@ -20,9 +23,11 @@ import uvicorn
 # Add parent directory to path for model imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from routes import network, application, audio, human, alerts
+from routes import network, application, audio, human, alerts, report
 from services.model_loader import ModelLoader
 from services.websocket_manager import ConnectionManager
+from services.threat_intelligence import threat_intelligence
+from services.email_service import email_service
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -70,8 +75,19 @@ async def lifespan(app: FastAPI):
     app.state.model_loader = model_loader
     app.state.ws_manager = ws_manager
     
+    # Initialize Threat Intelligence Engine
+    print("\n[TI] Initializing Threat Intelligence Engine...")
+    threat_intelligence.initialize(
+        ws_manager=ws_manager,
+        alert_store=alerts.alert_store,
+        email_service=email_service if email_service.enabled else None
+    )
+    app.state.threat_intelligence = threat_intelligence
+    
     print("\n" + "="*60)
     print("  ✅ All models loaded successfully!")
+    print("  🧠 Threat Intelligence Engine: ACTIVE")
+    print(f"  📧 Email Notifications: {'ENABLED' if email_service.enabled else 'DISABLED'}")
     print("  🚀 ARIHANT SOC API is ready")
     print("="*60 + "\n")
     
@@ -120,6 +136,7 @@ app.include_router(application.router, prefix="/api/application", tags=["Applica
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio Detection"])
 app.include_router(human.router, prefix="/api/human", tags=["Human Threat Detection"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["Alert Management"])
+app.include_router(report.router, prefix="/api/report", tags=["Threat Report Generation"])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROOT ENDPOINTS
@@ -140,6 +157,7 @@ async def root():
             "audio": "/api/audio/detect",
             "human": "/api/human/detect",
             "alerts": "/api/alerts",
+            "report": "/api/report/generate",
             "websocket": "/ws/alerts"
         }
     }
@@ -169,6 +187,8 @@ async def get_stats():
         "active_alerts": len(alerts.alert_store.alerts),
         "models_loaded": len(model_loader.loaded_models) if model_loader else 0,
         "websocket_clients": ws_manager.active_connections_count,
+        "websocket_stats": ws_manager.get_stats(),
+        "email_enabled": email_service.enabled,
         "timestamp": datetime.utcnow().isoformat()
     }
 

@@ -1,2 +1,2 @@
 # Routes package
-from . import network, application, audio, human, alerts
+from . import network, application, audio, human, alerts, report

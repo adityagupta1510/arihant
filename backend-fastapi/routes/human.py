@@ -2,6 +2,8 @@
 ARIHANT SOC - Human Threat Detection Routes
 ===========================================
 API endpoints for phishing and social engineering detection
+
+Auto-triggers threat intelligence reports on detection
 """
 
 from fastapi import APIRouter, Request, HTTPException
@@ -63,23 +65,34 @@ async def detect_phishing(
         prediction=result
     )
     
-    # Broadcast alert if phishing detected with high confidence
+    # AUTO-TRIGGER: Process through Threat Intelligence Engine if phishing detected
+    intelligence_result = None
     if result["phishing"] and result["confidence"] > 0.6:
-        import uuid
-        await ws_manager.broadcast_alert(
-            alert_id=str(uuid.uuid4()),
-            attack_type=result["threat_type"],
-            severity=result["severity"],
+        threat_intelligence = request.app.state.threat_intelligence
+        
+        # Map threat type to attack type
+        attack_type_map = {
+            "Credential Phishing": "Phishing",
+            "Financial Fraud / BEC": "BEC",
+            "Urgency Scam": "Phishing",
+            "Impersonation": "Phishing",
+            "Malware Distribution": "Malware"
+        }
+        attack_type = attack_type_map.get(result["threat_type"], "Phishing")
+        
+        intelligence_result = await threat_intelligence.process_detection(
+            attack_type=attack_type,
             confidence=result["confidence"],
-            source="HUMAN",
-            details={
-                "sender": data.sender,
-                "subject": data.subject,
-                "indicators_count": len(result["highlighted_phrases"])
-            }
+            severity=result["severity"],
+            source="human",
+            sender_email=data.sender,
+            email_subject=data.subject,
+            threat_type=result["threat_type"],
+            indicators_count=len(result["highlighted_phrases"]),
+            highlighted_phrases=result["highlighted_phrases"][:5]  # Top 5 phrases
         )
     
-    return HumanThreatResponse(
+    response = HumanThreatResponse(
         success=True,
         timestamp=datetime.utcnow(),
         processing_time_ms=result["processing_time_ms"],
@@ -91,6 +104,19 @@ async def detect_phishing(
         risk_indicators=result.get("risk_indicators"),
         recommendation=result["recommendation"]
     )
+    
+    # Add intelligence data to response if available
+    if intelligence_result:
+        response_dict = response.model_dump()
+        response_dict["intelligence"] = {
+            "report_id": intelligence_result["report"]["report_id"],
+            "alert_id": intelligence_result["alert"]["id"],
+            "contextual_insight": intelligence_result["report"].get("contextual_insight"),
+            "email_sent": intelligence_result.get("email_sent", False)
+        }
+        return response_dict
+    
+    return response
 
 
 @router.post(

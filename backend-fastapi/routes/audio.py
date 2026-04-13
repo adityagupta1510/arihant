@@ -2,6 +2,8 @@
 ARIHANT SOC - Audio Detection Routes
 ====================================
 API endpoints for audio spoof/deepfake detection
+
+Auto-triggers threat intelligence reports on detection
 """
 
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form
@@ -163,22 +165,23 @@ async def detect_audio_spoof(
             prediction=result
         )
         
-        # Broadcast alert if fake detected with high confidence
+        # AUTO-TRIGGER: Process through Threat Intelligence Engine if fake detected
+        intelligence_result = None
         if result["is_fake"] and result["confidence"] > 0.8:
-            import uuid
-            await ws_manager.broadcast_alert(
-                alert_id=str(uuid.uuid4()),
-                attack_type="Audio Deepfake",
-                severity=result["severity"],
+            threat_intelligence = request.app.state.threat_intelligence
+            
+            intelligence_result = await threat_intelligence.process_detection(
+                attack_type="Spoof Audio",
                 confidence=result["confidence"],
-                source="AUDIO",
-                details={
-                    "filename": audio_info.get("filename"),
-                    "duration": audio_info.get("duration_seconds")
-                }
+                severity=result["severity"],
+                source="audio",
+                filename=audio_info.get("filename"),
+                duration_seconds=audio_info.get("duration_seconds"),
+                sample_rate=audio_info.get("sample_rate"),
+                file_size_bytes=audio_info.get("file_size_bytes")
             )
         
-        return AudioDetectionResponse(
+        response = AudioDetectionResponse(
             success=True,
             timestamp=datetime.utcnow(),
             processing_time_ms=result["processing_time_ms"],
@@ -189,6 +192,19 @@ async def detect_audio_spoof(
             audio_features=audio_info,
             recommendation=result["recommendation"]
         )
+        
+        # Add intelligence data to response if available
+        if intelligence_result:
+            response_dict = response.model_dump()
+            response_dict["intelligence"] = {
+                "report_id": intelligence_result["report"]["report_id"],
+                "alert_id": intelligence_result["alert"]["id"],
+                "contextual_insight": intelligence_result["report"].get("contextual_insight"),
+                "email_sent": intelligence_result.get("email_sent", False)
+            }
+            return response_dict
+        
+        return response
         
     finally:
         # Cleanup temp file

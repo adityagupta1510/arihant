@@ -212,6 +212,8 @@ class AlertResponse(BaseModel):
     source_ip: Optional[str] = None
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
+    report_id: Optional[str] = None  # Link to threat intelligence report
+    contextual_insight: Optional[str] = None  # Quick insight from report
 
 
 class AlertListResponse(BaseResponse):

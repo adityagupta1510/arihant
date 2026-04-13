@@ -68,6 +68,13 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `PATCH /api/alerts/{id}` - Update alert
 - `POST /api/alerts/{id}/resolve` - Resolve alert
 
+### Threat Report Generation
+- `POST /api/report/generate` - Generate AI-powered threat report
+- `POST /api/report/generate/batch` - Generate multiple reports
+- `GET /api/report/attack-types` - List supported attack types
+- `GET /api/report/severity-levels` - Get severity level metadata
+- `POST /api/report/preview` - Preview report structure
+
 ## Configuration
 
 Copy `.env.example` to `.env` and configure:
@@ -80,6 +87,8 @@ Key settings:
 - `ELASTICSEARCH_URL` - Elasticsearch connection (optional)
 - `MODELS_DIR` - Path to trained models
 - `CORS_ORIGINS` - Allowed frontend origins
+- `OPENAI_API_KEY` - OpenAI API key for AI-enhanced reports (optional)
+- `OPENAI_BASE_URL` - Custom OpenAI-compatible endpoint (optional)
 
 ## Models
 
@@ -125,6 +134,68 @@ Alert message format:
 - Supports batch processing
 - Async model inference
 - Connection pooling for Elasticsearch
+
+## Threat Report Generation
+
+The threat report module converts raw ML detection output into human-friendly, actionable reports.
+
+### Example Request
+
+```bash
+curl -X POST http://localhost:8000/api/report/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "attack_type": "DDoS",
+    "confidence": 0.97,
+    "severity": "HIGH",
+    "source": "network"
+  }'
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "timestamp": "2024-01-15T10:30:00Z",
+  "processing_time_ms": 45.2,
+  "report": {
+    "title": "Distributed Denial of Service (DDoS) Attack Detected",
+    "summary": "⚠️ HIGH PRIORITY: A potential DDoS attack has been identified...",
+    "attack_details": {
+      "type": "DDoS",
+      "description": "A DDoS attack attempts to overwhelm a system...",
+      "impact": "This can slow down or crash your system...",
+      "source_layer": "NETWORK"
+    },
+    "risk_level": "HIGH",
+    "confidence_score": "97%",
+    "precautions": ["Monitor unusual spikes...", "..."],
+    "non_technical_advice": ["If your website becomes slow...", "..."],
+    "recommended_actions": ["Block suspicious IP addresses...", "..."],
+    "timestamp": "2024-01-15T10:30:00Z",
+    "report_id": "RPT-20240115103000-A1B2C3D4"
+  }
+}
+```
+
+### Supported Attack Types
+
+- DDoS, DoS
+- SQL Injection, XSS
+- Phishing, BEC
+- Spoof Audio (Deepfake Voice)
+- Insider Threat
+- Brute Force, Malware
+
+Unknown attack types receive generic but informative reports.
+
+### AI Enhancement (Optional)
+
+Set `OPENAI_API_KEY` in your `.env` to enable AI-enhanced explanations:
+- Simple, jargon-free explanations
+- Business impact assessment
+- Executive-level advice
 
 ## License
 

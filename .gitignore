@@ -205,3 +205,5 @@ src/
 data/
 models/
 ai_env/
+backend-fastapi/.env.example
+.env.example
